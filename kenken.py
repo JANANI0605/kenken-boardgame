@@ -1,714 +1,683 @@
-#!/usr/bin/env python3
 """
-KenKen Puzzle Generator
-Run with:  python3 kenken.py
-Opens a fully self-contained KenKen puzzle in your default browser.
-No external dependencies required.
+KenKen Puzzle — Pygame Edition
+================================
+Install:  pip install pygame
+Run:      python kenken_pygame.py
 """
 
-import webbrowser
-import tempfile
-import os
-
-HTML = r"""<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>KenKen Puzzle</title>
-<style>
-  @import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500;600&display=swap');
-
-  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-  :root {
-    --bg:      #0d0d14;
-    --surface: #1a1a28;
-    --border:  #2e2e42;
-    --accent:  #f5c542;
-    --text:    #f0eee8;
-    --muted:   #888;
-    --green:   #6fcf97;
-    --red:     #eb5757;
-    --blue:    #a0cfff;
-  }
-
-  body {
-    font-family: 'DM Sans', sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    min-height: 100vh;
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    padding: 2rem 1rem 4rem;
-  }
-
-  /* ── Header ── */
-  header { text-align: center; margin-bottom: 2rem; }
-  .logo {
-    font-family: 'Space Mono', monospace;
-    font-size: clamp(2rem, 6vw, 3.5rem);
-    font-weight: 700;
-    letter-spacing: -2px;
-    line-height: 1;
-  }
-  .logo span { color: var(--accent); }
-  .tagline {
-    font-size: 0.78rem;
-    letter-spacing: 3px;
-    text-transform: uppercase;
-    color: var(--muted);
-    margin-top: 0.4rem;
-  }
-
-  /* ── Controls bar ── */
-  .controls {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-    align-items: center;
-    justify-content: center;
-    margin-bottom: 2rem;
-  }
-  .ctrl-label {
-    font-size: 0.75rem;
-    text-transform: uppercase;
-    letter-spacing: 2px;
-    color: var(--muted);
-  }
-  select, button {
-    font-family: 'Space Mono', monospace;
-    font-size: 0.9rem;
-    border-radius: 4px;
-    cursor: pointer;
-    outline: none;
-    transition: all 0.15s;
-  }
-  select {
-    background: var(--surface);
-    border: 1px solid #444;
-    color: var(--text);
-    padding: 0.5rem 1rem;
-  }
-  select:hover, select:focus { border-color: var(--accent); }
-
-  button {
-    padding: 0.5rem 1.3rem;
-    font-weight: 700;
-    letter-spacing: 1px;
-    border: none;
-  }
-  .btn-primary { background: var(--accent); color: #0d0d14; }
-  .btn-primary:hover { background: #ffd966; }
-  .btn-primary:active { transform: scale(0.97); }
-  .btn-secondary {
-    background: transparent;
-    border: 1px solid #444;
-    color: var(--text);
-  }
-  .btn-secondary:hover { border-color: var(--accent); color: var(--accent); }
-
-  .status-badge {
-    font-family: 'Space Mono', monospace;
-    font-size: 0.78rem;
-    padding: 0.4rem 1rem;
-    border-radius: 4px;
-    border: 1px solid #444;
-    color: var(--muted);
-    min-width: 110px;
-    text-align: center;
-    transition: all 0.2s;
-  }
-  .status-badge.loading { color: var(--accent); border-color: var(--accent); animation: pulse 1s infinite; }
-  .status-badge.ok      { color: var(--green);  border-color: var(--green); }
-  .status-badge.err     { color: var(--red);    border-color: var(--red); }
-  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
-
-  /* ── Game area ── */
-  #gameArea {
-    display: flex;
-    gap: 2rem;
-    align-items: flex-start;
-    flex-wrap: wrap;
-    justify-content: center;
-  }
-
-  /* ── Grid ── */
-  #gridWrap { position: relative; }
-  #grid {
-    display: inline-grid;
-    border: 2.5px solid var(--accent);
-    background: var(--surface);
-  }
-
-  .cell {
-    position: relative;
-    width: 70px; height: 70px;
-    border: 1px solid var(--border);
-    display: flex; align-items: center; justify-content: center;
-    cursor: pointer;
-    transition: background 0.1s;
-    user-select: none;
-  }
-  .cell:hover { background: #22223a; }
-  .cell.selected { background: #2a2a44 !important; outline: 2px solid var(--accent); outline-offset: -2px; }
-  .cell.correct  { background: #152515 !important; }
-  .cell.wrong    { background: #2a1515 !important; }
-
-  .cage-hint {
-    position: absolute;
-    top: 3px; left: 4px;
-    font-family: 'Space Mono', monospace;
-    font-size: 0.6rem; font-weight: 700;
-    color: var(--accent);
-    pointer-events: none; z-index: 2;
-    line-height: 1;
-  }
-  .cell-val {
-    font-family: 'Space Mono', monospace;
-    font-size: 1.5rem; font-weight: 700;
-    color: var(--blue);
-    pointer-events: none; z-index: 1;
-  }
-  .cell-val.user-ok  { color: var(--green); }
-  .cell-val.user-err { color: var(--red); }
-
-  /* Cage borders */
-  .cbt { border-top:    2.5px solid var(--accent) !important; }
-  .cbb { border-bottom: 2.5px solid var(--accent) !important; }
-  .cbl { border-left:   2.5px solid var(--accent) !important; }
-  .cbr { border-right:  2.5px solid var(--accent) !important; }
-
-  /* ── Right panel ── */
-  .right-panel { display: flex; flex-direction: column; gap: 1.25rem; }
-
-  /* Numpad */
-  .numpad-title {
-    font-size: 0.72rem; text-transform: uppercase;
-    letter-spacing: 2px; color: var(--muted);
-    text-align: center; margin-bottom: 0.25rem;
-  }
-  #numpad { display: grid; gap: 6px; }
-  .num-btn {
-    width: 52px; height: 52px;
-    background: var(--surface);
-    border: 1px solid #444;
-    color: var(--text);
-    font-family: 'Space Mono', monospace;
-    font-size: 1.2rem; font-weight: 700;
-    border-radius: 4px; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-    transition: all 0.1s;
-  }
-  .num-btn:hover { background: #2a2a44; border-color: var(--accent); color: var(--accent); }
-  .erase-btn {
-    background: transparent; border: 1px solid #444; color: var(--muted);
-    font-family: 'Space Mono', monospace; font-size: 0.7rem;
-    letter-spacing: 1px; padding: 0.4rem;
-    width: 100%; border-radius: 4px; cursor: pointer;
-    transition: all 0.1s;
-  }
-  .erase-btn:hover { border-color: var(--red); color: var(--red); }
-
-  /* Info panel */
-  .info-panel {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1.25rem;
-    min-width: 180px;
-  }
-  .info-title {
-    font-family: 'Space Mono', monospace;
-    font-size: 0.68rem; letter-spacing: 2px;
-    text-transform: uppercase; color: var(--muted);
-    margin-bottom: 0.75rem;
-  }
-  .stat-row {
-    display: flex; justify-content: space-between; align-items: center;
-    padding: 0.35rem 0; border-bottom: 1px solid #222;
-    font-size: 0.85rem;
-  }
-  .stat-row:last-child { border-bottom: none; margin-top: 0.5rem; }
-  .stat-l { color: var(--muted); }
-  .stat-v { font-family: 'Space Mono', monospace; color: var(--accent); }
-  .diff-pill {
-    display: inline-block; padding: 0.2rem 0.75rem;
-    border-radius: 20px; font-size: 0.7rem;
-    letter-spacing: 1px; text-transform: uppercase;
-    font-family: 'Space Mono', monospace;
-  }
-  .pill-easy   { background:#152515; color:#6fcf97; border:1px solid #2a4a2a; }
-  .pill-medium { background:#1f1a08; color:#f5c542; border:1px solid #4a3a08; }
-  .pill-hard   { background:#2a1515; color:#eb5757; border:1px solid #4a2020; }
-
-  /* ── Empty state ── */
-  #emptyState {
-    text-align: center; padding: 3rem 2rem; color: #444;
-  }
-  .empty-icon { font-size: 3rem; margin-bottom: 1rem; }
-  .empty-text { font-family: 'Space Mono', monospace; font-size: 0.9rem; color: #555; }
-
-  /* ── Win overlay ── */
-  #winOverlay {
-    display: none; position: fixed; inset: 0;
-    background: rgba(13,13,20,0.93);
-    z-index: 200; align-items: center;
-    justify-content: center; flex-direction: column; gap: 1.5rem;
-  }
-  #winOverlay.show { display: flex; }
-  .win-star { font-size: 4rem; }
-  .win-title {
-    font-family: 'Space Mono', monospace;
-    font-size: 2.2rem; font-weight: 700;
-    color: var(--accent); letter-spacing: -1px;
-  }
-  .win-sub { color: var(--muted); font-size: 0.9rem; }
-
-  /* ── How to play ── */
-  details {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 1rem 1.25rem;
-    max-width: 680px; width: 100%;
-    margin-top: 2rem;
-  }
-  summary {
-    font-family: 'Space Mono', monospace;
-    font-size: 0.8rem; letter-spacing: 2px;
-    text-transform: uppercase; color: var(--muted);
-    cursor: pointer;
-  }
-  details p { font-size: 0.88rem; color: #aaa; line-height: 1.7; margin-top: 0.75rem; }
-  details ul { margin-top: 0.5rem; padding-left: 1.5rem; }
-  details li { font-size: 0.85rem; color: #aaa; line-height: 1.9; }
-</style>
-</head>
-<body>
-
-<header>
-  <div class="logo">KEN<span>KEN</span></div>
-  <div class="tagline">Math &amp; Logic Puzzle</div>
-</header>
-
-<div class="controls">
-  <span class="ctrl-label">Grid</span>
-  <select id="sizeSelect">
-    <option value="3">3 × 3</option>
-    <option value="4" selected>4 × 4</option>
-    <option value="5">5 × 5</option>
-    <option value="6">6 × 6</option>
-  </select>
-  <span class="ctrl-label">Difficulty</span>
-  <select id="diffSelect">
-    <option value="easy">Easy</option>
-    <option value="medium" selected>Medium</option>
-    <option value="hard">Hard</option>
-  </select>
-  <button class="btn-primary" id="genBtn">Generate →</button>
-  <button class="btn-secondary" id="checkBtn" style="display:none">Check</button>
-  <button class="btn-secondary" id="solveBtn" style="display:none">Solve</button>
-  <div class="status-badge" id="status">Ready</div>
-</div>
-
-<div id="gameArea">
-  <div id="emptyState">
-    <div class="empty-icon">◈</div>
-    <div class="empty-text">Select a size and hit Generate</div>
-  </div>
-</div>
-
-<div id="winOverlay">
-  <div class="win-star">★</div>
-  <div class="win-title">Puzzle Solved!</div>
-  <div class="win-sub" id="winSub"></div>
-  <button class="btn-primary" id="winNewBtn">New Puzzle →</button>
-</div>
-
-<details>
-  <summary>How to play</summary>
-  <p>KenKen is a math logic puzzle. Fill the grid so that:</p>
-  <ul>
-    <li>Each row contains the numbers <strong>1 to N</strong> exactly once.</li>
-    <li>Each column contains the numbers <strong>1 to N</strong> exactly once.</li>
-    <li>Each <strong>cage</strong> (bold-bordered group) satisfies its clue (e.g. <code>6×</code> means the cells multiply to 6).</li>
-    <li>A single-cell cage shows its value directly.</li>
-  </ul>
-  <p>Click a cell to select it, then press a number key or use the numpad. Use <kbd>⌫ Backspace</kbd> to erase. Arrow keys navigate the grid.</p>
-</details>
-
-<script>
-// ───────────────────────────── state
-let puzzle = null, userGrid = [], sel = null;
-let secs = 0, moves = 0, timerId = null;
-let N = 4;
-
-// ───────────────────────────── helpers
-const $ = id => document.getElementById(id);
-const cell = (r,c) => $(`c-${r}-${c}`);
-const val  = (r,c) => $(`v-${r}-${c}`);
-
-function setStatus(msg, cls='') {
-  const el = $('status');
-  el.textContent = msg;
-  el.className = 'status-badge' + (cls ? ' '+cls : '');
-}
-function fmtTime(s) {
-  const m = Math.floor(s/60);
-  return m > 0 ? `${m}m ${s%60}s` : `${s}s`;
-}
-function startTimer() {
-  if(timerId) clearInterval(timerId);
-  secs = 0; moves = 0;
-  timerId = setInterval(() => { secs++; updateStats(); }, 1000);
-}
-function updateStats() {
-  const t = $('statTime'), mv = $('statMoves');
-  if(t)  t.textContent = fmtTime(secs);
-  if(mv) mv.textContent = moves;
-}
-
-// ───────────────────────────── puzzle generation
-function latinSquare(n) {
-  const g = [];
-  for(let r=0;r<n;r++){
-    const row=[];
-    for(let c=0;c<n;c++) row.push((r+c)%n+1);
-    g.push(row);
-  }
-  // shuffle rows
-  for(let i=n-1;i>0;i--){
-    const j=Math.floor(Math.random()*(i+1));
-    [g[i],g[j]]=[g[j],g[i]];
-  }
-  // shuffle cols
-  for(let i=n-1;i>0;i--){
-    const j=Math.floor(Math.random()*(i+1));
-    for(let r=0;r<n;r++) [g[r][i],g[r][j]]=[g[r][j],g[r][i]];
-  }
-  return g;
-}
-
-function buildCages(sol, n, diff) {
-  const assigned = Array.from({length:n},()=>Array(n).fill(-1));
-  const cages = [];
-  let id = 0;
-  const maxSz = diff==='easy'?2:diff==='medium'?3:4;
-
-  const all = [];
-  for(let r=0;r<n;r++) for(let c=0;c<n;c++) all.push([r,c]);
-  for(let i=all.length-1;i>0;i--){
-    const j=Math.floor(Math.random()*(i+1));
-    [all[i],all[j]]=[all[j],all[i]];
-  }
-
-  const neighbors=(r,c)=>[[r-1,c],[r+1,c],[r,c-1],[r,c+1]]
-    .filter(([nr,nc])=>nr>=0&&nr<n&&nc>=0&&nc<n);
-
-  for(const [sr,sc] of all){
-    if(assigned[sr][sc]>=0) continue;
-    const cells=[[sr,sc]];
-    assigned[sr][sc]=id;
-    const sz=diff==='easy'?1+Math.floor(Math.random()*2):1+Math.floor(Math.random()*maxSz);
-    for(let k=1;k<sz;k++){
-      const cands=[];
-      for(const [r,c] of cells)
-        for(const [nr,nc] of neighbors(r,c))
-          if(assigned[nr][nc]<0) cands.push([nr,nc]);
-      if(!cands.length) break;
-      const pick=cands[Math.floor(Math.random()*cands.length)];
-      cells.push(pick);
-      assigned[pick[0]][pick[1]]=id;
-    }
-
-    const vals=cells.map(([r,c])=>sol[r][c]);
-    let op='', target=0;
-    if(cells.length===1){
-      target=vals[0];
-    } else {
-      const allowedOps = diff==='easy'?['+','-']:diff==='medium'?['+','-','×']:['+','-','×','÷'];
-      const possible=['+'];
-      if(vals.length===2){
-        possible.push('-');
-        possible.push('×');
-        const [a,b]=[Math.max(...vals),Math.min(...vals)];
-        if(b!==0&&a%b===0) possible.push('÷');
-      } else {
-        possible.push('×');
-      }
-      const choices=allowedOps.filter(o=>possible.includes(o));
-      op=choices[Math.floor(Math.random()*choices.length)]||'+';
-      if(op==='+') target=vals.reduce((a,b)=>a+b,0);
-      else if(op==='×') target=vals.reduce((a,b)=>a*b,1);
-      else if(op==='-'){
-        const s=[...vals].sort((a,b)=>b-a);
-        target=s[0]-s.slice(1).reduce((a,b)=>a+b,0);
-        if(target<1){ op='+'; target=vals.reduce((a,b)=>a+b,0); }
-      } else if(op==='÷'){
-        const s=[...vals].sort((a,b)=>b-a);
-        let t=s[0]; let ok=true;
-        for(let i=1;i<s.length;i++){
-          if(t%s[i]===0) t=t/s[i]; else { ok=false; break; }
-        }
-        if(ok&&t>=1){ target=t; }
-        else { op='×'; target=vals.reduce((a,b)=>a*b,1); }
-      }
-    }
-    cages.push({id,cells,op,target});
-    id++;
-  }
-  return cages;
-}
-
-function makePuzzle(n, diff) {
-  const sol = latinSquare(n);
-  const cages = buildCages(sol, n, diff);
-  return {sol, cages, n};
-}
-
-// ───────────────────────────── render
-function render(p) {
-  puzzle = p; N = p.n;
-  userGrid = Array.from({length:N},()=>Array(N).fill(0));
-  sel = null;
-
-  const ga = $('gameArea');
-  ga.innerHTML = '';
-
-  // cage lookup
-  const cageOf = Array.from({length:N},()=>Array(N).fill(null));
-  for(const cage of p.cages) for(const [r,c] of cage.cells) cageOf[r][c]=cage;
-
-  // grid
-  const gridWrap = document.createElement('div');
-  gridWrap.id='gridWrap';
-  const grid = document.createElement('div');
-  grid.id='grid';
-  grid.style.gridTemplateColumns=`repeat(${N},70px)`;
-  grid.style.gridTemplateRows=`repeat(${N},70px)`;
-
-  for(let r=0;r<N;r++) for(let c=0;c<N;c++){
-    const div=document.createElement('div');
-    div.className='cell'; div.id=`c-${r}-${c}`;
-    div.dataset.r=r; div.dataset.c=c;
-
-    const cage=cageOf[r][c];
-    if(cage){
-      const has=(dr,dc)=>cage.cells.some(([cr,cc])=>cr===r+dr&&cc===c+dc);
-      if(!has(-1,0)) div.classList.add('cbt');
-      if(!has(1,0))  div.classList.add('cbb');
-      if(!has(0,-1)) div.classList.add('cbl');
-      if(!has(0,1))  div.classList.add('cbr');
-
-      const sorted=[...cage.cells].sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
-      if(sorted[0][0]===r&&sorted[0][1]===c){
-        const hint=document.createElement('div');
-        hint.className='cage-hint';
-        hint.textContent=cage.op?cage.target+cage.op:cage.target;
-        div.appendChild(hint);
-      }
-    }
-
-    const vEl=document.createElement('div');
-    vEl.className='cell-val'; vEl.id=`v-${r}-${c}`;
-    div.appendChild(vEl);
-
-    div.addEventListener('click',()=>selectCell(r,c));
-    grid.appendChild(div);
-  }
-  gridWrap.appendChild(grid);
-  ga.appendChild(gridWrap);
-
-  // right panel
-  const rp=document.createElement('div');
-  rp.className='right-panel';
-
-  // numpad
-  const npWrap=document.createElement('div');
-  const npTitle=document.createElement('div');
-  npTitle.className='numpad-title'; npTitle.textContent='Numbers';
-  npWrap.appendChild(npTitle);
-  const npGrid=document.createElement('div');
-  npGrid.id='numpad';
-  npGrid.style.gridTemplateColumns=`repeat(${Math.min(N,4)},52px)`;
-  for(let i=1;i<=N;i++){
-    const btn=document.createElement('button');
-    btn.className='num-btn'; btn.textContent=i;
-    btn.addEventListener('click',()=>inputNum(i));
-    npGrid.appendChild(btn);
-  }
-  npWrap.appendChild(npGrid);
-  const erBtn=document.createElement('button');
-  erBtn.className='erase-btn'; erBtn.textContent='⌫  ERASE';
-  erBtn.addEventListener('click',()=>inputNum(0));
-  npWrap.appendChild(erBtn);
-  rp.appendChild(npWrap);
-
-  // info
-  const diff=$('diffSelect').value;
-  const ip=document.createElement('div');
-  ip.className='info-panel';
-  ip.innerHTML=`
-    <div class="info-title">Session</div>
-    <div class="stat-row"><span class="stat-l">Time</span><span class="stat-v" id="statTime">0s</span></div>
-    <div class="stat-row"><span class="stat-l">Moves</span><span class="stat-v" id="statMoves">0</span></div>
-    <div class="stat-row"><span class="stat-l">Grid</span><span class="stat-v">${N}×${N}</span></div>
-    <div class="stat-row"><span class="stat-l">Cages</span><span class="stat-v">${p.cages.length}</span></div>
-    <div class="stat-row">
-      <span class="diff-pill pill-${diff}">${diff}</span>
-    </div>
-  `;
-  rp.appendChild(ip);
-  ga.appendChild(rp);
-
-  $('checkBtn').style.display='';
-  $('solveBtn').style.display='';
-  startTimer();
-  setStatus('Playing','ok');
-}
-
-// ───────────────────────────── interaction
-function selectCell(r,c){
-  if(sel){
-    cell(sel[0],sel[1]).classList.remove('selected');
-  }
-  sel=[r,c];
-  cell(r,c).classList.add('selected');
-}
-
-function inputNum(n){
-  if(!sel||!puzzle) return;
-  const [r,c]=sel;
-  userGrid[r][c]=n;
-  moves++;
-  const vEl=val(r,c);
-  vEl.textContent=n||''; vEl.className='cell-val';
-  cell(r,c).classList.remove('correct','wrong');
-  updateStats();
-  autoCheck();
-}
-
-function autoCheck(){
-  for(let r=0;r<N;r++) for(let c=0;c<N;c++) if(userGrid[r][c]===0) return;
-  let ok=true;
-  for(let r=0;r<N;r++) for(let c=0;c<N;c++) if(userGrid[r][c]!==puzzle.sol[r][c]) ok=false;
-  if(ok) showWin();
-}
-
-function checkPuzzle(){
-  if(!puzzle) return;
-  let good=0,bad=0;
-  for(let r=0;r<N;r++) for(let c=0;c<N;c++){
-    const v=userGrid[r][c]; if(!v) continue;
-    const cEl=cell(r,c), vEl=val(r,c);
-    if(v===puzzle.sol[r][c]){
-      cEl.classList.add('correct'); cEl.classList.remove('wrong');
-      vEl.className='cell-val user-ok'; good++;
-    } else {
-      cEl.classList.add('wrong'); cEl.classList.remove('correct');
-      vEl.className='cell-val user-err'; bad++;
-    }
-  }
-  setStatus(`✓${good}  ✗${bad}`, bad>0?'err':'ok');
-}
-
-function solvePuzzle(){
-  if(!puzzle) return;
-  for(let r=0;r<N;r++) for(let c=0;c<N;c++){
-    userGrid[r][c]=puzzle.sol[r][c];
-    const vEl=val(r,c); const cEl=cell(r,c);
-    vEl.textContent=puzzle.sol[r][c]; vEl.className='cell-val user-ok';
-    cEl.classList.remove('wrong'); cEl.classList.add('correct');
-  }
-  if(timerId) clearInterval(timerId);
-  setStatus('Solved!','ok');
-}
-
-function showWin(){
-  if(timerId) clearInterval(timerId);
-  $('winSub').textContent=`Solved in ${fmtTime(secs)} · ${moves} moves`;
-  $('winOverlay').classList.add('show');
-}
-
-// ───────────────────────────── events
-$('genBtn').addEventListener('click',()=>{
-  const n=parseInt($('sizeSelect').value);
-  const d=$('diffSelect').value;
-  setStatus('Generating…','loading');
-  setTimeout(()=>{
-    const p=makePuzzle(n,d);
-    render(p);
-    $('winOverlay').classList.remove('show');
-  },60);
-});
-
-$('checkBtn').addEventListener('click', checkPuzzle);
-$('solveBtn').addEventListener('click', solvePuzzle);
-$('winNewBtn').addEventListener('click',()=>{ $('winOverlay').classList.remove('show'); $('genBtn').click(); });
-
-document.addEventListener('keydown', e=>{
-  if(!puzzle) return;
-  const k=e.key;
-  if(k>='1'&&k<=String(N)){ inputNum(parseInt(k)); return; }
-  if(k==='Backspace'||k==='Delete'||k==='0'){ inputNum(0); return; }
-  if(!sel) return;
-  const[r,c]=sel;
-  const dirs={ArrowUp:[-1,0],ArrowDown:[1,0],ArrowLeft:[0,-1],ArrowRight:[0,1]};
-  if(dirs[k]){
-    e.preventDefault();
-    const[dr,dc]=dirs[k];
-    const nr=Math.max(0,Math.min(N-1,r+dr));
-    const nc=Math.max(0,Math.min(N-1,c+dc));
-    selectCell(nr,nc);
-  }
-});
-
-// auto-start
-$('genBtn').click();
-</script>
-</body>
-</html>"""
-
-
-def main():
-    # Write to a temp file and open in browser
-    tmp = tempfile.NamedTemporaryFile(
-        mode='w', suffix='.html', delete=False,
-        prefix='kenken_', encoding='utf-8'
-    )
-    tmp.write(HTML)
-    tmp.close()
-
-    path = 'file://' + tmp.name
-    print("=" * 50)
-    print("  KenKen Puzzle")
-    print("=" * 50)
-    print(f"\n  Opening puzzle in your browser...")
-    print(f"  File: {tmp.name}")
-    print("\n  If it doesn't open automatically, copy the")
-    print(f"  path above into your browser.\n")
-    print("  Controls:")
-    print("    • Click a cell, then press 1–N or use numpad")
-    print("    • Arrow keys to navigate")
-    print("    • Backspace to erase")
-    print("    • Check / Solve buttons on the page")
-    print("\n  Close this terminal window to quit.")
-    print("=" * 50)
-
-    webbrowser.open(path)
-
-    try:
-        input("\n  Press Enter to exit and clean up...\n")
-    except (KeyboardInterrupt, EOFError):
-        pass
-    finally:
-        try:
-            os.unlink(tmp.name)
-        except OSError:
-            pass
-
-
+import pygame
+import sys
+import random
+import time
+
+# ──────────────────────────────────────────────
+#  COLOURS
+# ──────────────────────────────────────────────
+BG          = (13,  13,  20)
+SURFACE     = (26,  26,  40)
+BORDER      = (46,  46,  66)
+ACCENT      = (245, 197,  66)   # yellow
+TEXT        = (240, 238, 232)
+MUTED       = (120, 120, 120)
+BLUE_VAL    = (160, 207, 255)
+GREEN       = (111, 207, 151)
+RED         = (235,  87,  87)
+CAGE_BORDER = (245, 197,  66)
+SELECTED_BG = (42,  42,  68)
+CORRECT_BG  = (21,  37,  21)
+WRONG_BG    = (42,  21,  21)
+BTN_BG      = (245, 197,  66)
+BTN_TEXT    = (13,  13,  20)
+BTN2_BG     = (26,  26,  40)
+BTN2_BORDER = (80,  80, 100)
+NUMPAD_BG   = (26,  26,  40)
+NUMPAD_HV   = (42,  42,  68)
+WIN_OVERLAY = (13,  13,  20, 220)
+
+
+# ──────────────────────────────────────────────
+#  PUZZLE LOGIC
+# ──────────────────────────────────────────────
+def latin_square(n):
+    g = [[ (r+c)%n+1 for c in range(n)] for r in range(n)]
+    for i in range(n-1, 0, -1):
+        j = random.randint(0, i)
+        g[i], g[j] = g[j], g[i]
+    for i in range(n-1, 0, -1):
+        j = random.randint(0, i)
+        for r in range(n):
+            g[r][i], g[r][j] = g[r][j], g[r][i]
+    return g
+
+
+def build_cages(sol, n, diff):
+    assigned = [[-1]*n for _ in range(n)]
+    cages = []
+    cid = 0
+    max_sz = 2 if diff == 'Easy' else 3 if diff == 'Medium' else 4
+
+    all_cells = [(r, c) for r in range(n) for c in range(n)]
+    random.shuffle(all_cells)
+
+    def neighbors(r, c):
+        return [(r+dr, c+dc) for dr,dc in [(-1,0),(1,0),(0,-1),(0,1)]
+                if 0 <= r+dr < n and 0 <= c+dc < n]
+
+    for sr, sc in all_cells:
+        if assigned[sr][sc] >= 0:
+            continue
+        cells = [(sr, sc)]
+        assigned[sr][sc] = cid
+        sz = random.randint(1, max_sz)
+        for _ in range(sz - 1):
+            cands = [(nr,nc) for r,c in cells
+                     for nr,nc in neighbors(r,c)
+                     if assigned[nr][nc] < 0]
+            if not cands:
+                break
+            pick = random.choice(cands)
+            cells.append(pick)
+            assigned[pick[0]][pick[1]] = cid
+
+        vals = [sol[r][c] for r,c in cells]
+        op, target = '', 0
+
+        if len(cells) == 1:
+            target = vals[0]
+        else:
+            allowed = ['+', '-'] if diff == 'Easy' else \
+                      ['+', '-', '×'] if diff == 'Medium' else \
+                      ['+', '-', '×', '÷']
+            possible = ['+']
+            if len(cells) == 2:
+                possible += ['-', '×']
+                a, b = max(vals), min(vals)
+                if b != 0 and a % b == 0:
+                    possible.append('÷')
+            else:
+                possible.append('×')
+            choices = [o for o in allowed if o in possible]
+            op = random.choice(choices) if choices else '+'
+
+            if op == '+':
+                target = sum(vals)
+            elif op == '×':
+                t = 1
+                for v in vals: t *= v
+                target = t
+            elif op == '-':
+                sv = sorted(vals, reverse=True)
+                target = sv[0] - sum(sv[1:])
+                if target < 1:
+                    op = '+'; target = sum(vals)
+            elif op == '÷':
+                sv = sorted(vals, reverse=True)
+                t = sv[0]
+                ok = True
+                for v in sv[1:]:
+                    if v != 0 and t % v == 0:
+                        t //= v
+                    else:
+                        ok = False; break
+                if ok and t >= 1:
+                    target = t
+                else:
+                    op = '×'
+                    t = 1
+                    for v in vals: t *= v
+                    target = t
+
+        top_cell = sorted(cells)[0]
+        cages.append({'id': cid, 'cells': cells, 'op': op,
+                      'target': target, 'top': top_cell})
+        cid += 1
+
+    return cages
+
+
+def make_puzzle(n, diff):
+    sol = latin_square(n)
+    cages = build_cages(sol, n, diff)
+    return {'sol': sol, 'cages': cages, 'n': n}
+
+
+# ──────────────────────────────────────────────
+#  BUTTON
+# ──────────────────────────────────────────────
+class Button:
+    def __init__(self, rect, label, primary=True):
+        self.rect   = pygame.Rect(rect)
+        self.label  = label
+        self.primary = primary
+        self.hovered = False
+
+    def draw(self, surf, font):
+        bg = BTN_BG if self.primary else (NUMPAD_HV if self.hovered else BTN2_BG)
+        pygame.draw.rect(surf, bg, self.rect, border_radius=6)
+        if not self.primary:
+            pygame.draw.rect(surf, BTN2_BORDER if not self.hovered else ACCENT,
+                             self.rect, 1, border_radius=6)
+        tc = BTN_TEXT if self.primary else (ACCENT if self.hovered else TEXT)
+        txt = font.render(self.label, True, tc)
+        surf.blit(txt, txt.get_rect(center=self.rect.center))
+
+    def handle(self, event):
+        if event.type == pygame.MOUSEMOTION:
+            self.hovered = self.rect.collidepoint(event.pos)
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect.collidepoint(event.pos):
+                return True
+        return False
+
+
+# ──────────────────────────────────────────────
+#  DROPDOWN
+# ──────────────────────────────────────────────
+class Dropdown:
+    def __init__(self, rect, options, selected=0):
+        self.rect     = pygame.Rect(rect)
+        self.options  = options
+        self.selected = selected
+        self.open     = False
+
+    @property
+    def value(self):
+        return self.options[self.selected]
+
+    def draw(self, surf, font):
+        pygame.draw.rect(surf, SURFACE, self.rect, border_radius=4)
+        pygame.draw.rect(surf, ACCENT if self.open else BORDER,
+                         self.rect, 1, border_radius=4)
+        txt = font.render(self.value, True, TEXT)
+        surf.blit(txt, (self.rect.x+10, self.rect.y + (self.rect.h-txt.get_height())//2))
+        arr = font.render('▾', True, ACCENT)
+        surf.blit(arr, (self.rect.right-22, self.rect.y+(self.rect.h-arr.get_height())//2))
+
+        if self.open:
+            item_h = self.rect.h
+            for i, opt in enumerate(self.options):
+                r = pygame.Rect(self.rect.x,
+                                self.rect.bottom + i*item_h,
+                                self.rect.w, item_h)
+                bg = SELECTED_BG if i == self.selected else SURFACE
+                pygame.draw.rect(surf, bg, r)
+                pygame.draw.rect(surf, BORDER, r, 1)
+                t = font.render(opt, True, ACCENT if i == self.selected else TEXT)
+                surf.blit(t, (r.x+10, r.y+(r.h-t.get_height())//2))
+
+    def handle(self, event):
+        changed = False
+        if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.rect.collidepoint(event.pos):
+                self.open = not self.open
+            elif self.open:
+                item_h = self.rect.h
+                for i in range(len(self.options)):
+                    r = pygame.Rect(self.rect.x,
+                                    self.rect.bottom + i*item_h,
+                                    self.rect.w, item_h)
+                    if r.collidepoint(event.pos):
+                        self.selected = i
+                        changed = True
+                        break
+                self.open = False
+        return changed
+
+
+# ──────────────────────────────────────────────
+#  MAIN GAME
+# ──────────────────────────────────────────────
+class KenKen:
+    SIZES = ['3×3', '4×4', '5×5', '6×6']
+    DIFFS = ['Easy', 'Medium', 'Hard']
+
+    def __init__(self):
+        pygame.init()
+        self.W, self.H = 900, 680
+        self.screen = pygame.display.set_mode((self.W, self.H), pygame.RESIZABLE)
+        pygame.display.set_caption('KenKen Puzzle')
+
+        # fonts
+        self.font_lg  = pygame.font.SysFont('consolas,couriernew,monospace', 36, bold=True)
+        self.font_md  = pygame.font.SysFont('consolas,couriernew,monospace', 20, bold=True)
+        self.font_sm  = pygame.font.SysFont('consolas,couriernew,monospace', 14)
+        self.font_btn = pygame.font.SysFont('consolas,couriernew,monospace', 15, bold=True)
+        self.font_hint= pygame.font.SysFont('consolas,couriernew,monospace', 12, bold=True)
+
+        # dropdowns
+        self.dd_size = Dropdown((20, 14, 110, 34), self.SIZES, selected=1)
+        self.dd_diff = Dropdown((150, 14, 110, 34), self.DIFFS, selected=1)
+
+        # buttons
+        self.btn_gen   = Button((280, 14, 110, 34), 'Generate', primary=True)
+        self.btn_check = Button((400, 14, 90,  34), 'Check',    primary=False)
+        self.btn_solve = Button((500, 14, 90,  34), 'Solve',    primary=False)
+        self.btn_new   = Button((340, 420, 160, 44), 'New Puzzle', primary=True)
+
+        self.puzzle   = None
+        self.user     = []
+        self.sel      = None
+        self.state    = {}  # (r,c) -> 'ok'|'err'|None
+        self.start_t  = None
+        self.elapsed  = 0
+        self.moves    = 0
+        self.won      = False
+        self.status   = 'Press Generate to start'
+        self.status_c = MUTED
+
+        self.cell_size = 80
+        self.grid_ox   = 0
+        self.grid_oy   = 0
+
+        self.clock = pygame.time.Clock()
+
+    # ── layout ──────────────────────────────
+    def layout(self):
+        W, H = self.screen.get_size()
+        n = self.puzzle['n'] if self.puzzle else 4
+
+        # right panel width: numpad cols * (btn+gap) + info padding
+        PANEL_W = 240
+        MARGIN   = 20
+
+        # cell size fills available space left of right panel, centred
+        avail_w = W - PANEL_W - MARGIN * 3   # space for grid
+        avail_h = H - 80                      # below toolbar
+        max_cell = min(avail_w // n, avail_h // n, 90)
+        self.cell_size = max(50, max_cell)
+
+        grid_w = self.cell_size * n
+        grid_h = self.cell_size * n
+
+        # centre the grid in the left region
+        left_region_w = W - PANEL_W - MARGIN
+        self.grid_ox = (left_region_w - grid_w) // 2
+        self.grid_oy = 70 + (avail_h - grid_h) // 2
+
+        # right panel starts after the left region
+        self.panel_x = W - PANEL_W - MARGIN
+
+        # reposition toolbar buttons (centred in left region)
+        total_btn_w = sum(b.rect.w for b in [self.btn_gen, self.btn_check, self.btn_solve]) + 20
+        bx = (left_region_w - total_btn_w) // 2
+        for btn in [self.btn_gen, self.btn_check, self.btn_solve]:
+            btn.rect.x = bx; bx += btn.rect.w + 10
+
+    # ── drawing ─────────────────────────────
+    def draw_header(self):
+        W = self.screen.get_width()
+        # Logo
+        logo1 = self.font_lg.render('KEN', True, TEXT)
+        logo2 = self.font_lg.render('KEN', True, ACCENT)
+        lw = logo1.get_width() + logo2.get_width()
+        # Put logo at far right
+        lx = W - lw - 20
+        self.screen.blit(logo1, (lx, 10))
+        self.screen.blit(logo2, (lx + logo1.get_width(), 10))
+
+    def draw_status(self):
+        txt = self.font_sm.render(self.status, True, self.status_c)
+        W = self.screen.get_width()
+        logo1 = self.font_lg.render('KEN', True, TEXT)
+        logo2 = self.font_lg.render('KEN', True, ACCENT)
+        lw = logo1.get_width() + logo2.get_width()
+        lx = W - lw - 20
+        TAB = 24
+        self.screen.blit(txt, (lx - txt.get_width() - TAB, 22))
+
+    def draw_grid(self):
+        if not self.puzzle:
+            msg = self.font_md.render('Press  Generate  to start', True, MUTED)
+            W, H = self.screen.get_size()
+            self.screen.blit(msg, msg.get_rect(center=(self.panel_x // 2, H // 2)))
+            return
+
+        p  = self.puzzle
+        n  = p['n']
+        cs = self.cell_size
+        ox, oy = self.grid_ox, self.grid_oy
+
+        cage_of = [[None]*n for _ in range(n)]
+        for cage in p['cages']:
+            for r,c in cage['cells']:
+                cage_of[r][c] = cage
+
+        for r in range(n):
+            for c in range(n):
+                x = ox + c*cs
+                y = oy + r*cs
+                rect = pygame.Rect(x, y, cs, cs)
+
+                # background
+                bg = SURFACE
+                if self.sel == (r,c):       bg = SELECTED_BG
+                if (r,c) in self.state:
+                    s = self.state[(r,c)]
+                    if s == 'ok':  bg = CORRECT_BG
+                    if s == 'err': bg = WRONG_BG
+                pygame.draw.rect(self.screen, bg, rect)
+
+                # inner grid line
+                pygame.draw.rect(self.screen, BORDER, rect, 1)
+
+                # cage borders (thick yellow)
+                cage = cage_of[r][c]
+                if cage:
+                    def in_cage(dr,dc):
+                        return any(cr==r+dr and cc==c+dc for cr,cc in cage['cells'])
+                    bw = 3
+                    if not in_cage(-1,0):
+                        pygame.draw.line(self.screen, CAGE_BORDER, (x,y),   (x+cs,y),   bw)
+                    if not in_cage(1,0):
+                        pygame.draw.line(self.screen, CAGE_BORDER, (x,y+cs),(x+cs,y+cs),bw)
+                    if not in_cage(0,-1):
+                        pygame.draw.line(self.screen, CAGE_BORDER, (x,y),   (x,y+cs),   bw)
+                    if not in_cage(0,1):
+                        pygame.draw.line(self.screen, CAGE_BORDER, (x+cs,y),(x+cs,y+cs),bw)
+
+                    # hint label on top-left cell of cage
+                    if (r,c) == cage['top']:
+                        label = f"{cage['target']}{cage['op']}"
+                        ht = self.font_hint.render(label, True, ACCENT)
+                        self.screen.blit(ht, (x+4, y+3))
+
+                # user value
+                v = self.user[r][c]
+                if v:
+                    col = BLUE_VAL
+                    if (r,c) in self.state:
+                        col = GREEN if self.state[(r,c)]=='ok' else RED
+                    num = self.font_md.render(str(v), True, col)
+                    self.screen.blit(num, num.get_rect(center=(x+cs//2, y+cs//2)))
+
+        # outer border
+        outer = pygame.Rect(ox, oy, n*cs, n*cs)
+        pygame.draw.rect(self.screen, ACCENT, outer, 3)
+
+    def draw_numpad(self):
+        if not self.puzzle:
+            return
+        n  = self.puzzle['n']
+        px = self.panel_x
+        py = self.grid_oy
+
+        title = self.font_sm.render('NUMBERS', True, MUTED)
+        self.screen.blit(title, (px, py))
+        py += 24
+
+        cols = min(n, 4)
+        bsz  = 48
+        gap  = 6
+        for i in range(1, n+1):
+            col = (i-1) % cols
+            row = (i-1) // cols
+            x = px + col*(bsz+gap)
+            y = py + row*(bsz+gap)
+            r = pygame.Rect(x, y, bsz, bsz)
+            mx,my = pygame.mouse.get_pos()
+            hv = r.collidepoint(mx,my)
+            pygame.draw.rect(self.screen, NUMPAD_HV if hv else NUMPAD_BG, r, border_radius=4)
+            pygame.draw.rect(self.screen, ACCENT if hv else BORDER, r, 1, border_radius=4)
+            t = self.font_md.render(str(i), True, ACCENT if hv else TEXT)
+            self.screen.blit(t, t.get_rect(center=r.center))
+
+        # erase
+        rows = (n-1)//cols + 1
+        ey = py + rows*(bsz+gap) + 4
+        er = pygame.Rect(px, ey, cols*(bsz+gap)-gap, 32)
+        mx,my = pygame.mouse.get_pos()
+        hv = er.collidepoint(mx,my)
+        pygame.draw.rect(self.screen, NUMPAD_HV if hv else NUMPAD_BG, er, border_radius=4)
+        pygame.draw.rect(self.screen, (200,80,80) if hv else BORDER, er, 1, border_radius=4)
+        et = self.font_sm.render('⌫  ERASE', True, RED if hv else MUTED)
+        self.screen.blit(et, et.get_rect(center=er.center))
+
+        self._numpad_y   = py
+        self._numpad_bsz = bsz
+        self._numpad_gap = gap
+        self._numpad_cols= cols
+        self._numpad_rows= rows
+        self._erase_rect = er
+
+    def draw_info(self):
+        if not self.puzzle:
+            return
+        px = self.panel_x
+        n  = self.puzzle['n']
+        cols = min(n,4); bsz=48; gap=6
+        rows = (n-1)//cols+1
+        py = self.grid_oy + 24 + rows*(bsz+gap) + 42 + 20
+
+        # box
+        iw = cols*(bsz+gap)-gap + 20
+        panel = pygame.Rect(px-10, py, iw, 180)
+        pygame.draw.rect(self.screen, SURFACE, panel, border_radius=8)
+        pygame.draw.rect(self.screen, BORDER,  panel, 1, border_radius=8)
+
+        title = self.font_sm.render('SESSION', True, MUTED)
+        self.screen.blit(title, (px, py+10))
+
+        elapsed = self.elapsed
+        if self.start_t and not self.won:
+            elapsed = int(time.time() - self.start_t)
+        m = elapsed//60; s = elapsed%60
+        tstr = f'{m}m {s}s' if m else f'{s}s'
+
+        rows_info = [
+            ('Time',   tstr,              ACCENT),
+            ('Moves',  str(self.moves),   ACCENT),
+            ('Grid',   f'{n}×{n}',        ACCENT),
+            ('Cages',  str(len(self.puzzle["cages"])), ACCENT),
+            ('Diff',   self.dd_diff.value,
+             GREEN if self.dd_diff.value=='Easy'
+             else ACCENT if self.dd_diff.value=='Medium' else RED),
+        ]
+        for i,(lbl,val,vc) in enumerate(rows_info):
+            ry = py + 34 + i*28
+            lt = self.font_sm.render(lbl, True, MUTED)
+            vt = self.font_sm.render(val, True, vc)
+            self.screen.blit(lt, (px, ry))
+            self.screen.blit(vt, (px + iw - vt.get_width() - 20, ry))
+
+    def draw_win(self):
+        W, H = self.screen.get_size()
+        overlay = pygame.Surface((W,H), pygame.SRCALPHA)
+        overlay.fill((13,13,20,220))
+        self.screen.blit(overlay, (0,0))
+
+        star = self.font_lg.render('★  Puzzle Solved!  ★', True, ACCENT)
+        self.screen.blit(star, star.get_rect(center=(W//2, H//2 - 80)))
+
+        elapsed = self.elapsed
+        m=elapsed//60; s=elapsed%60
+        tstr=f'{m}m {s}s' if m else f'{s}s'
+        sub = self.font_md.render(
+            f'Solved in {tstr}  ·  {self.moves} moves', True, MUTED)
+        self.screen.blit(sub, sub.get_rect(center=(W//2, H//2-30)))
+
+        self.btn_new.rect.center = (W//2, H//2+50)
+        self.btn_new.draw(self.screen, self.font_btn)
+
+    # ── interaction ─────────────────────────
+    def select_cell(self, r, c):
+        self.sel = (r,c)
+
+    def input_num(self, num):
+        if not self.sel or not self.puzzle:
+            return
+        r,c = self.sel
+        self.user[r][c] = num
+        self.moves += 1
+        self.state.pop((r,c), None)
+        self.auto_win()
+
+    def auto_win(self):
+        n = self.puzzle['n']
+        for r in range(n):
+            for c in range(n):
+                if self.user[r][c] == 0:
+                    return
+        sol = self.puzzle['sol']
+        for r in range(n):
+            for c in range(n):
+                if self.user[r][c] != sol[r][c]:
+                    return
+        self.won = True
+        self.elapsed = int(time.time() - self.start_t)
+
+    def check_puzzle(self):
+        if not self.puzzle:
+            return
+        sol = self.puzzle['sol']
+        n   = self.puzzle['n']
+        good = bad = 0
+        self.state.clear()
+        for r in range(n):
+            for c in range(n):
+                v = self.user[r][c]
+                if not v:
+                    continue
+                if v == sol[r][c]:
+                    self.state[(r,c)] = 'ok'; good+=1
+                else:
+                    self.state[(r,c)] = 'err'; bad+=1
+        self.status = f'✓ {good}  correct    ✗ {bad}  wrong'
+        self.status_c = GREEN if bad==0 else RED
+
+    def solve_puzzle(self):
+        if not self.puzzle:
+            return
+        sol = self.puzzle['sol']
+        n   = self.puzzle['n']
+        for r in range(n):
+            for c in range(n):
+                self.user[r][c] = sol[r][c]
+                self.state[(r,c)] = 'ok'
+        self.won = True
+        self.elapsed = int(time.time() - self.start_t)
+        self.status = 'Solved!'; self.status_c = GREEN
+
+    def generate(self):
+        n = int(self.dd_size.value[0])
+        d = self.dd_diff.value
+        self.puzzle  = make_puzzle(n, d)
+        self.user    = [[0]*n for _ in range(n)]
+        self.sel     = None
+        self.state   = {}
+        self.won     = False
+        self.moves   = 0
+        self.start_t = time.time()
+        self.elapsed = 0
+        self.status  = 'Playing'
+        self.status_c= GREEN
+        self.layout()
+
+    def handle_grid_click(self, mx, my):
+        if not self.puzzle:
+            return
+        n  = self.puzzle['n']
+        cs = self.cell_size
+        ox, oy = self.grid_ox, self.grid_oy
+        if ox <= mx < ox+n*cs and oy <= my < oy+n*cs:
+            c = (mx-ox)//cs
+            r = (my-oy)//cs
+            self.select_cell(r,c)
+
+    def handle_numpad_click(self, mx, my):
+        if not self.puzzle:
+            return
+        if not hasattr(self,'_numpad_y'):
+            return
+        px   = self.panel_x
+        py   = self._numpad_y
+        bsz  = self._numpad_bsz
+        gap  = self._numpad_gap
+        cols = self._numpad_cols
+        n    = self.puzzle['n']
+        for i in range(1, n+1):
+            col = (i-1)%cols; row=(i-1)//cols
+            x=px+col*(bsz+gap); y=py+row*(bsz+gap)
+            r=pygame.Rect(x,y,bsz,bsz)
+            if r.collidepoint(mx,my):
+                self.input_num(i); return
+        if self._erase_rect.collidepoint(mx,my):
+            self.input_num(0)
+
+    # ── main loop ───────────────────────────
+    def run(self):
+        self.layout()
+        while True:
+            self.screen.fill(BG)
+
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit(); sys.exit()
+
+                if event.type == pygame.VIDEORESIZE:
+                    self.layout()
+
+                # dropdowns
+                for dd in [self.dd_size, self.dd_diff]:
+                    dd.handle(event)
+
+                # buttons
+                if self.btn_gen.handle(event):
+                    self.generate()
+                if self.btn_check.handle(event):
+                    self.check_puzzle()
+                if self.btn_solve.handle(event):
+                    self.solve_puzzle()
+                if self.won and self.btn_new.handle(event):
+                    self.generate()
+
+                if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+                    # close dropdowns on outside click (already handled)
+                    self.handle_grid_click(*event.pos)
+                    self.handle_numpad_click(*event.pos)
+
+                if event.type == pygame.KEYDOWN:
+                    k = event.key
+                    n = self.puzzle['n'] if self.puzzle else 4
+                    if pygame.K_1 <= k <= pygame.K_9:
+                        num = k - pygame.K_0
+                        if num <= n:
+                            self.input_num(num)
+                    elif k in (pygame.K_BACKSPACE, pygame.K_DELETE, pygame.K_0):
+                        self.input_num(0)
+                    elif self.sel and self.puzzle:
+                        r,c = self.sel
+                        if k == pygame.K_UP:    self.select_cell(max(0,r-1),c)
+                        if k == pygame.K_DOWN:  self.select_cell(min(n-1,r+1),c)
+                        if k == pygame.K_LEFT:  self.select_cell(r,max(0,c-1))
+                        if k == pygame.K_RIGHT: self.select_cell(r,min(n-1,c+1))
+
+            # draw
+            self.draw_header()
+
+            # top controls
+            for dd in [self.dd_size, self.dd_diff]:
+                dd.draw(self.screen, self.font_btn)
+            self.btn_gen.draw(self.screen, self.font_btn)
+            if self.puzzle:
+                self.btn_check.draw(self.screen, self.font_btn)
+                self.btn_solve.draw(self.screen, self.font_btn)
+
+            self.draw_status()
+
+            # separator line
+            pygame.draw.line(self.screen, BORDER, (0,56), (self.screen.get_width(),56), 1)
+
+            self.draw_grid()
+            self.draw_numpad()
+            self.draw_info()
+
+            if self.won:
+                self.draw_win()
+
+            pygame.display.flip()
+            self.clock.tick(60)
+
+
+# ──────────────────────────────────────────────
 if __name__ == '__main__':
-    main()
+    KenKen().run()
